@@ -553,6 +553,113 @@ describe('events', { timeout: 8000 }, () => {
     await worker.close();
   });
 
+  it('emits the completed event with a JSON-parsed returnvalue typed by the ResultType generic', async () => {
+    interface JobResult {
+      ok: boolean;
+      count: number;
+      tags: string[];
+    }
+
+    const expectedResult: JobResult = { ok: true, count: 3, tags: ['a', 'b'] };
+
+    const typedQueueName = `test-typed-${randomUUID()}`;
+    const typedQueue = new Queue<unknown, JobResult>(typedQueueName, {
+      connection,
+      prefix,
+    });
+    const typedQueueEvents = new QueueEvents<JobResult>(typedQueueName, {
+      connection,
+      prefix,
+    });
+    await typedQueue.waitUntilReady();
+    await typedQueueEvents.waitUntilReady();
+
+    const worker = new Worker<unknown, JobResult>(
+      typedQueueName,
+      async () => expectedResult,
+      { connection, prefix },
+    );
+    await worker.waitUntilReady();
+
+    await delay(50); // additional delay since XREAD from '$' is unstable
+
+    const completed = new Promise<void>((resolve, reject) => {
+      typedQueueEvents.once('completed', ({ returnvalue }) => {
+        try {
+          // Runtime assertion: queue-events emits the JSON-parsed value
+          // (not the raw JSON string that Redis carries on the wire).
+          expect(returnvalue).toEqual(expectedResult);
+          expect(typeof returnvalue).toBe('object');
+          // Property-level access compiles only when ResultType is narrowed.
+          expect(returnvalue.ok).toBe(true);
+          expect(returnvalue.count).toBe(3);
+          expect(returnvalue.tags).toEqual(['a', 'b']);
+          resolve();
+        } catch (err) {
+          reject(err);
+        }
+      });
+    });
+
+    await typedQueue.add('test', {});
+
+    await completed;
+    await worker.close();
+    await typedQueueEvents.close();
+    await typedQueue.close();
+    await removeAllQueueData(new IORedis(redisHost), typedQueueName);
+  });
+
+  it('allows extending QueueEventsListener with a ResultType to narrow returnvalue', async () => {
+    interface NumericResult {
+      value: number;
+    }
+    interface NarrowedListener extends QueueEventsListener<NumericResult> {}
+
+    const numericQueueName = `test-numeric-${randomUUID()}`;
+    const numericQueue = new Queue<unknown, NumericResult>(numericQueueName, {
+      connection,
+      prefix,
+    });
+    const numericQueueEvents = new QueueEvents(numericQueueName, {
+      connection,
+      prefix,
+    });
+    await numericQueue.waitUntilReady();
+    await numericQueueEvents.waitUntilReady();
+
+    const worker = new Worker<unknown, NumericResult>(
+      numericQueueName,
+      async () => ({ value: 42 }),
+      { connection, prefix },
+    );
+    await worker.waitUntilReady();
+
+    await delay(50);
+
+    const completed = new Promise<void>((resolve, reject) => {
+      numericQueueEvents.on<NarrowedListener>(
+        'completed',
+        ({ returnvalue }) => {
+          try {
+            expect(returnvalue.value).toBe(42);
+            resolve();
+          } catch (err) {
+            reject(err);
+          }
+        },
+      );
+    });
+
+    await numericQueue.add('test', {});
+
+    await completed;
+    await worker.close();
+    await numericQueueEvents.close();
+    await numericQueue.close();
+    await removeAllQueueData(new IORedis(redisHost), numericQueueName);
+  });
+
   describe('when jobs removal is attempted on non-existed records', async () => {
     it('should not publish removed events', async () => {
       const numRemovals = 100;
