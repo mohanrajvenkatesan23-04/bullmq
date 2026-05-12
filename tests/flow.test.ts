@@ -661,6 +661,43 @@ describe('flows', () => {
         await flow.close();
       });
     });
+
+    describe('when child is fetched after dependency has been removed', () => {
+      it('does not restore the parent reference on subsequent fetches', async () => {
+        const flow = new FlowProducer({ connection, prefix });
+        const { children } = await flow.add({
+          name: 'parent',
+          data: {},
+          queueName,
+          children: [
+            {
+              queueName,
+              name: 'child0',
+              data: {},
+              opts: {},
+            },
+          ],
+        });
+
+        const childJob = children![0].job;
+        expect(childJob.parent).toBeDefined();
+        expect(childJob.parentKey).toBeDefined();
+
+        const relationshipIsBroken = await childJob.removeChildDependency();
+        expect(relationshipIsBroken).toBe(true);
+        expect(childJob.parent).toBeUndefined();
+        expect(childJob.parentKey).toBeUndefined();
+
+        // Re-fetch the child after the dependency was removed - simulates
+        // what happens on a subsequent attempt of the job (issue #2833).
+        const refetchedChild = await Job.fromId(queue, childJob.id!);
+        expect(refetchedChild).toBeDefined();
+        expect(refetchedChild!.parent).toBeUndefined();
+        expect(refetchedChild!.parentKey).toBeUndefined();
+
+        await flow.close();
+      });
+    });
   });
 
   describe('when ignoreDependencyOnFailure is provided', async () => {

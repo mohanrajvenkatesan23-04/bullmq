@@ -407,12 +407,20 @@ export class Job<
       job.returnvalue = getReturnValue(json.returnvalue);
     }
 
+    // The parent fields stored as separate hash entries are the source of
+    // truth (they get cleared by removeChildDependency), so always sync them
+    // back onto the job - including the case where they are missing, since
+    // the constructor may have populated them from opts.parent.
     if (json.parentKey) {
       job.parentKey = json.parentKey;
+    } else {
+      job.parentKey = undefined;
     }
 
     if (json.parent) {
       job.parent = JSON.parse(json.parent);
+    } else {
+      job.parent = undefined;
     }
 
     if (json.pb) {
@@ -636,6 +644,13 @@ export class Job<
     if (childDependencyIsRemoved) {
       this.parent = undefined;
       this.parentKey = undefined;
+      // Also clear the parent option so that any subsequent rehydration of
+      // this job (for instance, fetching the same job again on a retry after
+      // moveToDelayed) does not resurrect the cleared parent reference from
+      // the stored opts blob.
+      if (this.opts) {
+        delete this.opts.parent;
+      }
       return true;
     }
 
