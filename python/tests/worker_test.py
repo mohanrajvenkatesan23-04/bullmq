@@ -858,5 +858,33 @@ class TestWorker(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(jobs, [])
         self.assertEqual(pending, set())
 
+    def test_next_job_from_job_data_accepts_fractional_ms_delay_until(self):
+        # Regression test for #2208: getNextDelayedTimestamp.lua divides
+        # the packed delayed-set score by 0x1000, so delay_until can
+        # arrive as a fractional-ms string like '1696233644865.1'.
+        # Before the fix, nextJobFromJobData passed this straight to
+        # int() which raised ValueError and crashed the worker
+        # coroutine, blocking the whole worker.
+        worker = Worker.__new__(Worker)
+        worker.limitUntil = 0
+        worker.blockUntil = 0
+        worker.drained = False
+
+        # Fractional-ms string (from the reporter's stack trace).
+        worker.nextJobFromJobData(None, None, 0, '1696233644865.1', None)
+        self.assertEqual(worker.blockUntil, 1696233644865)
+
+        # Float input must also be accepted.
+        worker.nextJobFromJobData(None, None, 0, 1696233644865.7, None)
+        self.assertEqual(worker.blockUntil, 1696233644865)
+
+        # Plain integer-ms (pre-existing happy path) still works.
+        worker.nextJobFromJobData(None, None, 0, 1696233644865, None)
+        self.assertEqual(worker.blockUntil, 1696233644865)
+
+        # Integer-ms encoded as a string (also pre-existing) still works.
+        worker.nextJobFromJobData(None, None, 0, '1696233644865', None)
+        self.assertEqual(worker.blockUntil, 1696233644865)
+
 if __name__ == '__main__':
     unittest.main()

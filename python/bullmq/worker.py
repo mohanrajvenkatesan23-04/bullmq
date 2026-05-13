@@ -222,7 +222,16 @@ class Worker(EventEmitter):
                 self.blockUntil = 0
 
         if delay_until:
-            self.blockUntil = max(int(delay_until), 0) or 0
+            # delay_until can arrive as a fractional-ms value (e.g.
+            # '1696233644865.1') because getNextDelayedTimestamp.lua
+            # divides the packed delayed-set score by 0x1000, and the
+            # low bits encoding the job sequence can produce a
+            # non-integer quotient. int() on such a string raises
+            # ValueError and crashes the worker coroutine (see #2208),
+            # so parse through float() first and truncate sub-ms —
+            # blockUntil is downstream consumed as an ms-grained
+            # integer by getBlockTimeout/bzpopmin.
+            self.blockUntil = max(int(float(delay_until)), 0) or 0
 
         if job_data:
             self.drained = False
