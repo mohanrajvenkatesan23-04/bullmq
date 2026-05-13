@@ -195,6 +195,36 @@ describe('queues', () => {
     });
   });
 
+  describe('when whitespace-only name is provided', () => {
+    it('throws an error', async () => {
+      expect(
+        () =>
+          new Queue('   ', {
+            connection,
+            prefix,
+          }),
+      ).toThrow('Queue name must be a non-empty string');
+    });
+
+    it('throws an error for tab and newline only names', async () => {
+      expect(
+        () =>
+          new Queue('\t\n', {
+            connection,
+            prefix,
+          }),
+      ).toThrow('Queue name must be a non-empty string');
+    });
+
+    it('does not throw for a valid name', async () => {
+      const validQueue = new Queue('valid-name', {
+        connection,
+        prefix,
+      });
+      await validQueue.close();
+    });
+  });
+
   describe('.drain', () => {
     it('count added, unprocessed jobs', async () => {
       const maxJobs = 100;

@@ -62,6 +62,10 @@ export class QueueBase extends EventEmitter implements MinimalQueue {
       throw new Error('Queue name must be provided');
     }
 
+    if (typeof name !== 'string' || name.trim().length === 0) {
+      throw new Error('Queue name must be a non-empty string');
+    }
+
     if (name.includes(':')) {
       throw new Error('Queue name cannot contain :');
     }
