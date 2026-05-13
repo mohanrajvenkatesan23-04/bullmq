@@ -671,6 +671,47 @@ describe('connection', () => {
     expect(client.status).toEqual('end');
   });
 
+  // Regression test for https://github.com/taskforcesh/bullmq/issues/2686.
+  // Closing a Queue/Worker pair that shares an ioredis client before the
+  // queue's initial info / client setname command has been flushed off the
+  // offlineQueue caused the user's later `client.quit()` to reject with
+  // "Connection is closed." This was because ioredis's closeHandler would
+  // forcibly drain the offlineQueue with that error when the socket went
+  // away. We now await the in-flight init inside RedisConnection.close()
+  // so the pending commands are drained naturally before the client is
+  // torn down.
+  it('does not reject with Connection is closed when closed mid-init', async () => {
+    const sharedClient = new IORedis(redisHost, {
+      maxRetriesPerRequest: null,
+    });
+    sharedClient.on('error', () => {});
+
+    const raceQueueName = `race-${randomUUID()}`;
+    const raceQueue = new Queue(raceQueueName, {
+      connection: sharedClient,
+      prefix,
+    });
+    const raceWorker = new Worker(raceQueueName, async () => {}, {
+      connection: sharedClient,
+      prefix,
+    });
+
+    raceQueue.on('error', () => {});
+    raceWorker.on('error', () => {});
+
+    // Close in immediate succession, without awaiting waitUntilReady, so
+    // that the initial info / client setname commands are still pending
+    // on the shared ioredis offlineQueue when close() runs.
+    await Promise.all([raceQueue.close(), raceWorker.close()]);
+
+    // Before the fix this rejected with `Connection is closed.` because
+    // ioredis flushed bullmq's pending init commands off the offlineQueue
+    // when the socket was torn down.
+    await expect(sharedClient.quit()).resolves.toBeDefined();
+
+    await removeAllQueueData(new IORedis(redisHost), raceQueueName);
+  });
+
   it('should recover from a connection loss', async () => {
     let processor;
 

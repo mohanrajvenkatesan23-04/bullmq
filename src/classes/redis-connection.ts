@@ -550,6 +550,22 @@ export class RedisConnection extends EventEmitter {
         if (status === 'ready') {
           // Not sure if we need to wait for this
           await this.initializing;
+        } else if (status === 'initializing' && !force) {
+          // Issue #2686: close() racing with the initial info / client setname
+          // command leaves it pending on ioredis's offlineQueue. If we
+          // disconnect now, ioredis's closeHandler forcibly flushes that
+          // queue with "Connection is closed", and the rejection escapes
+          // into the caller. Awaiting the pending init lets it settle
+          // (either resolving once the client is ready, or rejecting in a
+          // way we can safely swallow as a connection error below) before
+          // we tear the socket down.
+          try {
+            await this.initializing;
+          } catch (error) {
+            if (isNotConnectionError(error as Error)) {
+              throw error;
+            }
+          }
         }
         if (!this.extraOptions.shared) {
           if (status == 'initializing' || force) {
